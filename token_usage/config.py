@@ -122,3 +122,36 @@ def label(cfg: dict[str, Any], key: str) -> str:
 
 def cfg_val(cfg: dict[str, Any], key: str, default: Any = None) -> Any:
     return _get_nested(cfg, [CONFIG_SECTION, key], default)
+
+
+def model_pricing(cfg: dict[str, Any], model: str) -> Optional[dict[str, float]]:
+    """Per-1M-token pricing for *model* from ``token_plugin.pricing`` config.
+
+    Returns ``{"input_per_1m": float, "output_per_1m": float}`` when the model
+    (exact match, else longest configured prefix match) has pricing, otherwise
+    None. A model with no pricing entry has no trustworthy cost data, so callers
+    should render ``n/a`` rather than fabricating USD 0.0000.
+    """
+    pricing = _get_nested(cfg, [CONFIG_SECTION, "pricing"], None)
+    if not isinstance(pricing, dict) or not pricing:
+        return None
+    entry = pricing.get(model)
+    if entry is None:
+        # Fall back to the longest configured prefix that the model name starts with.
+        best_key: Optional[str] = None
+        for key in pricing:
+            if isinstance(key, str) and model.startswith(key):
+                if best_key is None or len(key) > len(best_key):
+                    best_key = key
+        if best_key is None:
+            return None
+        entry = pricing[best_key]
+    if not isinstance(entry, dict):
+        return None
+    try:
+        return {
+            "input_per_1m": float(entry.get("input_per_1m", 0) or 0),
+            "output_per_1m": float(entry.get("output_per_1m", 0) or 0),
+        }
+    except (TypeError, ValueError):
+        return None

@@ -9,7 +9,7 @@ from __future__ import annotations
 import sqlite3
 from typing import Any, Optional
 
-from .config import WINDOWS, cfg_val
+from .config import WINDOWS, cfg_val, model_pricing
 from .db import open_db
 from .domain import (
     Currency, ModelUsage, OutputFormat, Session, SessionModelUsageRow,
@@ -71,6 +71,23 @@ class TokenUsageService:
         self._conn = conn
         self._cfg = cfg
 
+    # -- cost -----------------------------------------------------------------
+    def _model_cost(self, model: str, input_tokens: int, output_tokens: int) -> Optional[float]:
+        """Estimated USD cost for *model* from per-1M-token pricing config.
+
+        Returns None when no pricing entry exists for the model (callers render
+        ``n/a`` rather than fabricating USD 0.0000). Pricing is linear per token,
+        so per-model costs sum exactly to the total cost.
+        """
+        pricing = model_pricing(self._cfg, model)
+        if pricing is None:
+            return None
+        rate_in = float(pricing.get("input_per_1m", 0) or 0)
+        rate_out = float(pricing.get("output_per_1m", 0) or 0)
+        return (int(input_tokens or 0) / 1_000_000.0) * rate_in + (
+            int(output_tokens or 0) / 1_000_000.0
+        ) * rate_out
+
     def build_report(self, ns: Any) -> UsageReport:
         cfg = self._cfg
         db_path = str(cfg_val(cfg, "db_path", "~/.hermes/state.db"))
@@ -128,6 +145,16 @@ class TokenUsageService:
                 models_where += " AND smu.model = ?"
             models_params = models_params + [ns.model]
         models = self._list_models(models_where, models_params)
+        # Pricing is linear per token, so per-model costs sum exactly to the total.
+        # If any model lacks pricing, the total cost is unknown (n/a).
+        model_costs = [m.get("est_cost") for m in models]
+        if model_costs and all(c is not None for c in model_costs):
+            totals["est_cost"] = sum(float(c) for c in model_costs if c is not None)
+        elif model_costs:
+            totals["est_cost"] = None
+        else:
+            totals["est_cost"] = 0
+        totals["actual_cost"] = None
         sessions = self._list_sessions(where, params, max_sessions)
 
         # mark the current session in the sessions list
@@ -215,9 +242,7 @@ class TokenUsageService:
             COALESCE(SUM(cache_write_tokens), 0) as cache_write_tokens,
             COALESCE(SUM(reasoning_tokens), 0) as reasoning_tokens,
             COALESCE(SUM(input_tokens + output_tokens), 0) as total_tokens,
-            COALESCE(SUM(api_call_count), 0) as api_calls,
-            COALESCE(SUM(estimated_cost_usd), 0) as est_cost,
-            COALESCE(SUM(actual_cost_usd), 0) as actual_cost
+            COALESCE(SUM(api_call_count), 0) as api_calls
         FROM sessions
         WHERE {where}
         """
@@ -234,16 +259,23 @@ class TokenUsageService:
             COALESCE(SUM(smu.cache_read_tokens), 0) as cache_read_tokens,
             COALESCE(SUM(smu.cache_write_tokens), 0) as cache_write_tokens,
             COALESCE(SUM(smu.input_tokens + smu.output_tokens), 0) as total_tokens,
-            COALESCE(SUM(smu.api_call_count), 0) as api_calls,
-            COALESCE(SUM(smu.estimated_cost_usd), 0) as est_cost,
-            COALESCE(SUM(smu.actual_cost_usd), 0) as actual_cost
+            COALESCE(SUM(smu.api_call_count), 0) as api_calls
         FROM session_model_usage smu
         JOIN sessions s ON s.id = smu.session_id
         WHERE {where}
         GROUP BY smu.model
         ORDER BY total_tokens DESC
         """
-        return [dict(r) for r in self._conn.execute(sql, params).fetchall()]
+        rows: list[dict[str, Any]] = []
+        for r in self._conn.execute(sql, params).fetchall():
+            row = dict(r)
+            row["est_cost"] = self._model_cost(
+                row.get("model", ""), row.get("input_tokens", 0), row.get("output_tokens", 0)
+            )
+            # No trustworthy actual-cost source in the DB: do not fabricate 0.0000.
+            row["actual_cost"] = None
+            rows.append(row)
+        return rows
 
     def _list_sessions(self, where: str, params: list[Any],
                        limit: int) -> list[dict[str, Any]]:
@@ -258,7 +290,15 @@ class TokenUsageService:
         ORDER BY total_tokens DESC
         LIMIT ?
         """
-        return [dict(r) for r in self._conn.execute(sql, params + [limit]).fetchall()]
+        rows: list[dict[str, Any]] = []
+        for r in self._conn.execute(sql, params + [limit]).fetchall():
+            row = dict(r)
+            row["est_cost"] = self._model_cost(
+                row.get("model", ""), row.get("input_tokens", 0), row.get("output_tokens", 0)
+            )
+            row["actual_cost"] = None
+            rows.append(row)
+        return rows
 
     def _get_session(self, session_id: str) -> Optional[dict[str, Any]]:
         row = self._conn.execute(
@@ -272,7 +312,14 @@ class TokenUsageService:
             """,
             [session_id],
         ).fetchone()
-        return dict(row) if row else None
+        if row is None:
+            return None
+        row = dict(row)
+        row["est_cost"] = self._model_cost(
+            row.get("model", ""), row.get("input_tokens", 0), row.get("output_tokens", 0)
+        )
+        row["actual_cost"] = None
+        return row
 
     def _list_session_models(self, session_id: str) -> list[dict[str, Any]]:
         sql = """
@@ -285,7 +332,15 @@ class TokenUsageService:
         WHERE session_id = ?
         ORDER BY input_tokens + output_tokens DESC
         """
-        return [dict(r) for r in self._conn.execute(sql, [session_id]).fetchall()]
+        rows: list[dict[str, Any]] = []
+        for r in self._conn.execute(sql, [session_id]).fetchall():
+            row = dict(r)
+            row["est_cost"] = self._model_cost(
+                row.get("model", ""), row.get("input_tokens", 0), row.get("output_tokens", 0)
+            )
+            row["actual_cost"] = None
+            rows.append(row)
+        return rows
 
     # -- session drill-down report ----------------------------------------
 
@@ -299,6 +354,13 @@ class TokenUsageService:
         session_models = self._list_session_models(session_id)
 
         if session_models:
+            model_costs = [m.get("est_cost") for m in session_models]
+            if all(c is not None for c in model_costs):
+                total_est_cost: Optional[float] = sum(
+                    float(c) for c in model_costs if c is not None
+                )
+            else:
+                total_est_cost = None
             totals = {
                 "sessions": 1,
                 "input_tokens": sum(m.get("input_tokens", 0) or 0 for m in session_models),
@@ -311,15 +373,15 @@ class TokenUsageService:
                     for m in session_models
                 ),
                 "api_calls": sum(m.get("api_call_count", 0) or 0 for m in session_models),
-                "est_cost": sum(m.get("estimated_cost_usd", 0) or 0 for m in session_models),
-                "actual_cost": sum(m.get("actual_cost_usd", 0) or 0 for m in session_models),
+                "est_cost": total_est_cost,
+                "actual_cost": None,
             }
         else:
             totals = {
                 "sessions": 0, "input_tokens": 0, "output_tokens": 0,
                 "cache_read_tokens": 0, "cache_write_tokens": 0,
                 "reasoning_tokens": 0, "total_tokens": 0, "api_calls": 0,
-                "est_cost": 0, "actual_cost": 0,
+                "est_cost": 0, "actual_cost": None,
             }
 
         meta.update({

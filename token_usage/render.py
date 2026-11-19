@@ -33,6 +33,8 @@ def fmt_int(n: Any) -> str:
 
 
 def fmt_cost(n: Any, currency: str = "USD") -> str:
+    if n is None:
+        return "n/a"
     try:
         return f"{currency} {float(n):,.4f}"
     except (TypeError, ValueError):
@@ -58,6 +60,22 @@ def fmt_share(part: Any, whole: Any) -> str:
         return f"{p / w * 100:.1f}"
     except (TypeError, ValueError):
         return "0.0"
+
+
+def fmt_ratio(part: Any, whole: Any) -> str:
+    """Share of *part* against *whole* as a percentage, or ``n/a`` when unknown.
+
+    Used for the cache-read ratio (cache reads vs real tokens), which is often
+    the most informative number in the report.
+    """
+    try:
+        p = float(part or 0)
+        w = float(whole or 0)
+        if w <= 0:
+            return "n/a"
+        return f"{p / w * 100:.1f}%"
+    except (TypeError, ValueError):
+        return "n/a"
 
 
 def truncate(s: Any, width: int = 24) -> str:
@@ -96,17 +114,19 @@ def box_table(title: Optional[str], headers: list[str],
 def _render_totals(totals: dict[str, Any], cfg: dict[str, Any],
                    currency: str) -> str:
     L = lambda k: label(cfg, k)
+    total_tokens = int(totals.get("total_tokens", 0))
     rows = [
         [L("hdr_sessions"), fmt_int(totals.get("sessions", 0))],
         [L("hdr_input"), fmt_int(totals.get("input_tokens", 0))],
         [L("hdr_output"), fmt_int(totals.get("output_tokens", 0))],
         [L("hdr_cache_read"), fmt_int(totals.get("cache_read_tokens", 0))],
+        [L("hdr_cache_ratio"), fmt_ratio(totals.get("cache_read_tokens", 0), total_tokens)],
         [L("hdr_cache_write"), fmt_int(totals.get("cache_write_tokens", 0))],
         [L("hdr_reasoning"), fmt_int(totals.get("reasoning_tokens", 0))],
-        [L("hdr_total"), fmt_int(totals.get("total_tokens", 0))],
+        [L("hdr_total"), fmt_int(total_tokens)],
         [L("hdr_api_calls"), fmt_int(totals.get("api_calls", 0))],
-        [f"{L('hdr_est_cost')} ({currency})", fmt_cost(totals.get("est_cost", 0), currency)],
-        [f"{L('hdr_actual_cost')} ({currency})", fmt_cost(totals.get("actual_cost", 0), currency)],
+        [f"{L('hdr_est_cost')} ({currency})", fmt_cost(totals.get("est_cost"), currency)],
+        [f"{L('hdr_actual_cost')} ({currency})", fmt_cost(totals.get("actual_cost"), currency)],
     ]
     return box_table(L("totals_title"), [L("hdr_sessions"), "Value"], rows)
 
@@ -117,18 +137,19 @@ def _render_models(models: list[dict[str, Any]], grand_total: int,
     rows: list[list[str]] = []
     for m in models:
         rows.append([
-            m.get("model", ""),  # full model name, not truncated
+            m.get("model", ""),
             fmt_int(m.get("sessions", 0)),
             fmt_int(m.get("input_tokens", 0)),
             fmt_int(m.get("output_tokens", 0)),
             fmt_int(m.get("cache_read_tokens", 0)),
+            fmt_ratio(m.get("cache_read_tokens", 0), m.get("total_tokens", 0)),
             fmt_int(m.get("total_tokens", 0)),
             fmt_share(m.get("total_tokens", 0), grand_total),
             fmt_int(m.get("api_calls", 0)),
-            fmt_cost(m.get("est_cost", 0), currency),
+            fmt_cost(m.get("est_cost"), currency),
         ])
     headers = [L("hdr_model"), L("hdr_sessions"), L("hdr_input"), L("hdr_output"),
-               L("hdr_cache_read"), L("hdr_total"), L("hdr_share"),
+               L("hdr_cache_read"), L("hdr_cache_ratio"), L("hdr_total"), L("hdr_share"),
                L("hdr_api_calls"), f"{L('hdr_est_cost')} ({currency})"]
     return box_table(L("model_title"), headers, rows)
 
@@ -145,22 +166,23 @@ def _render_sessions(sessions: list[dict[str, Any]], cfg: dict[str, Any],
         current_marker = "◄ current" if is_current else ""
         rows.append([
             sid,
-            s.get("model", ""),  # full model name, not truncated
+            s.get("model", ""),
             current_marker,
             fmt_ts(s.get("started_at")),
             fmt_ts(s.get("last_activity_at")),
             fmt_int(s.get("input_tokens", 0)),
             fmt_int(s.get("output_tokens", 0)),
             fmt_int(s.get("cache_read_tokens", 0)),
+            fmt_ratio(s.get("cache_read_tokens", 0), s.get("total_tokens", 0)),
             fmt_int(s.get("reasoning_tokens", 0)),
             fmt_int(s.get("total_tokens", 0)),
             fmt_int(s.get("api_call_count", 0)),
-            fmt_cost(s.get("estimated_cost_usd", 0), currency),
+            fmt_cost(s.get("est_cost"), currency),
         ])
     headers = [L("hdr_session"), L("hdr_model"), L("hdr_current"),
                L("hdr_started"), L("hdr_last_activity"), L("hdr_input"),
-               L("hdr_output"), L("hdr_cache_read"), L("hdr_reasoning"),
-               L("hdr_total"), L("hdr_api_calls"),
+               L("hdr_output"), L("hdr_cache_read"), L("hdr_cache_ratio"),
+               L("hdr_reasoning"), L("hdr_total"), L("hdr_api_calls"),
                f"{L('hdr_est_cost')} ({currency})"]
     return box_table(L("session_title"), headers, rows)
 
@@ -169,8 +191,13 @@ def _render_session_models(session_models: list[dict[str, Any]],
                            cfg: dict[str, Any], currency: str) -> str:
     """--session drill-down table: each model/billing-context row."""
     L = lambda k: label(cfg, k)
+    session_total = sum(
+        int(sm.get("input_tokens", 0) or 0) + int(sm.get("output_tokens", 0) or 0)
+        for sm in session_models
+    )
     rows: list[list[str]] = []
     for sm in session_models:
+        model_total = int(sm.get("input_tokens", 0) or 0) + int(sm.get("output_tokens", 0) or 0)
         rows.append([
             sm.get("model", ""),  # full model name, not truncated
             sm.get("billing_provider", "") or L("meta_no_data"),
@@ -180,19 +207,21 @@ def _render_session_models(session_models: list[dict[str, Any]],
             fmt_int(sm.get("input_tokens", 0)),
             fmt_int(sm.get("output_tokens", 0)),
             fmt_int(sm.get("cache_read_tokens", 0)),
+            fmt_ratio(sm.get("cache_read_tokens", 0), model_total),
             fmt_int(sm.get("cache_write_tokens", 0)),
             fmt_int(sm.get("reasoning_tokens", 0)),
-            fmt_int(sm.get("input_tokens", 0) + sm.get("output_tokens", 0)),
+            fmt_int(model_total),
+            fmt_share(model_total, session_total),
             fmt_int(sm.get("api_call_count", 0)),
-            fmt_cost(sm.get("estimated_cost_usd", 0), currency),
-            fmt_cost(sm.get("actual_cost_usd", 0), currency),
+            fmt_cost(sm.get("est_cost"), currency),
+            fmt_cost(sm.get("actual_cost"), currency),
             fmt_ts(sm.get("first_seen")),
             fmt_ts(sm.get("last_seen")),
         ])
     headers = [L("hdr_model"), L("hdr_billing_provider"), L("hdr_billing_base_url"),
                L("hdr_billing_mode"), L("hdr_task"), L("hdr_input"), L("hdr_output"),
-               L("hdr_cache_read"), L("hdr_cache_write"), L("hdr_reasoning"),
-               L("hdr_total"), L("hdr_api_calls"),
+               L("hdr_cache_read"), L("hdr_cache_ratio"), L("hdr_cache_write"),
+               L("hdr_reasoning"), L("hdr_total"), L("hdr_share"), L("hdr_api_calls"),
                f"{L('hdr_est_cost')} ({currency})",
                f"{L('hdr_actual_cost')} ({currency})",
                L("hdr_first_seen"), L("hdr_last_seen")]
@@ -292,14 +321,15 @@ def render_text(totals: dict[str, Any], models: list[dict[str, Any]],
                     [L("hdr_input"), fmt_int(totals.get("input_tokens", 0))],
                     [L("hdr_output"), fmt_int(totals.get("output_tokens", 0))],
                     [L("hdr_cache_read"), fmt_int(totals.get("cache_read_tokens", 0))],
+                    [L("hdr_cache_ratio"), fmt_ratio(totals.get("cache_read_tokens", 0), totals.get("total_tokens", 0))],
                     [L("hdr_cache_write"), fmt_int(totals.get("cache_write_tokens", 0))],
                     [L("hdr_reasoning"), fmt_int(totals.get("reasoning_tokens", 0))],
                     [L("hdr_total"), fmt_int(totals.get("total_tokens", 0))],
                     [L("hdr_api_calls"), fmt_int(totals.get("api_calls", 0))],
                     [f"{L('hdr_est_cost')} ({currency})",
-                     fmt_cost(totals.get("est_cost", 0), currency)],
+                     fmt_cost(totals.get("est_cost"), currency)],
                     [f"{L('hdr_actual_cost')} ({currency})",
-                     fmt_cost(totals.get("actual_cost", 0), currency)],
+                     fmt_cost(totals.get("actual_cost"), currency)],
                 ],
             ))
             parts.append("")

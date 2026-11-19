@@ -73,10 +73,41 @@ All configuration lives under `token_plugin:` in `~/.hermes/config.yaml`
 | `token_plugin.output_format` | `TOKEN_PLUGIN_OUTPUT_FORMAT` | `table` | `table` or `json`. |
 | `token_plugin.max_sessions` | `TOKEN_PLUGIN_MAX_SESSIONS` | `50` | Max sessions to list in the per-session breakdown. |
 | `token_plugin.profile` | `TOKEN_PLUGIN_PROFILE` | `` | Optional `profile_name` filter applied to all queries. |
-| `token_plugin.currency_label` | `TOKEN_PLUGIN_CURRENCY_LABEL` | `USD` | Currency label for cost columns (USD only; no FX conversion). |
+|| `token_plugin.currency_label` | `TOKEN_PLUGIN_CURRENCY_LABEL` | `USD` | Currency label for cost columns (USD only; no FX conversion). ||
 
 Labels and column headers are config-driven under `token_plugin.labels:*`; unset
 labels fall back to the key name itself.
+
+## Pricing
+
+The DB stores claimed cost **totals**, not per-token **rates**, so the plugin
+never fabricates a `USD 0.0000` price:
+
+* When `token_plugin.pricing` has an entry for the model (exact match, else the
+  longest configured prefix match), estimated cost is computed per model as
+  `(input_tokens / 1M) × input_per_1m + (output_tokens / 1M) × output_per_1m`,
+  and per-model costs sum exactly to the window total.
+* When no pricing entry exists for a model, its cost shows `n/a` — honest
+  rather than a fabricated `USD 0.0000`. The window total shows `n/a` if any
+  model in it lacks pricing.
+
+| Config key | Env var | Default | Description |
+|------------|---------|---------|-------------|
+| `token_plugin.pricing.<model>.input_per_1m` | `TOKEN_PLUGIN_PRICING_<MODEL>_INPUT_PER_1M` | — | Estimated USD per 1M input tokens for `<model>`. |
+| `token_plugin.pricing.<model>.output_per_1m` | `TOKEN_PLUGIN_PRICING_<MODEL>_OUTPUT_PER_1M` | — | Estimated USD per 1M output tokens for `<model>`. |
+
+Model names match exactly, or by longest configured prefix (e.g.
+`nvidia/nemotron-3.5` covers all that provider's models). Pricing is per-user
+config; there is no shared price list. Add pricing only for the models you
+actually want priced — everything else stays `n/a`.
+
+### Future: opt-in provider API (not implemented)
+
+A future option is an opt-in `token_plugin.pricing_source` config pointing at a
+billing endpoint the plugin polls for per-model rates. That is deliberately
+**not** implemented here: it breaks the plugin's no-network guarantee, and the
+DB holds no rates to derive them from. Leave `token_plugin.pricing` unset and
+cost columns will show `n/a` until you opt in.
 
 ## Database
 
@@ -118,8 +149,8 @@ Token Usage — Lifetime Totals
 │ Reasoning         │ 632.9K     │
 │ Total Tokens      │ 17.1M      │
 │ API Calls         │ 2.3K       │
-│ Est. Cost (USD)   │ USD 0.0000 │
-│ Actual Cost (USD) │ USD 0.0000 │
+│ Est. Cost (USD)   │ n/a        │
+│ Actual Cost (USD) │ n/a        │
 └───────────────────┴────────────┘
 
 Token Usage — Per-Model Breakdown
@@ -127,10 +158,10 @@ Token Usage — Per-Model Breakdown
 ┌──────────────────────────┬──────────┬──────────────┬───────────────┬────────────┬──────────────┬─────────┬───────────┬─────────────────┐
 │ Model                    │ Sessions │ Input Tokens │ Output Tokens │ Cache Read │ Total Tokens │ Share % │ API Calls │ Est. Cost (USD) │
 ├──────────────────────────┼──────────┼──────────────┼───────────────┼────────────┼──────────────┼─────────┼───────────┼─────────────────┤
-│ nvidia/nemotron-3.5-sup… │ 24       │ 15.2M        │ 1.6M          │ 418.1M     │ 16.9M        │ 98.4    │ 2.2K      │ USD 0.0000      │
-│ nvidia/nemotron-3-ultra… │ 7        │ 3.2M         │ 196.5K        │ 48.1M      │ 3.4M         │ 19.7    │ 420       │ USD 0.0000      │
-│ private/nvidia/nemotron… │ 24       │ 149.1K       │ 13.1K         │ 0          │ 162.2K       │ 0.9     │ 94        │ USD 0.0000      │
-│ stepfun/step-3.7-flash:… │ 1        │ 13.7K        │ 170           │ 1.7K       │ 13.9K        │ 0.1     │ 1         │ USD 0.0000      │
+│ nvidia/nemotron-3.5-sup… │ 24       │ 15.2M        │ 1.6M          │ 418.1M     │ 16.9M        │ 98.4    │ 2.2K      │ n/a               │
+│ nvidia/nemotron-3-ultra… │ 7        │ 3.2M         │ 196.5K        │ 48.1M      │ 3.4M         │ 19.7    │ 420       │ n/a               │
+│ private/nvidia/nemotron… │ 24       │ 149.1K       │ 13.1K         │ 0          │ 162.2K       │ 0.9     │ 94        │ n/a               │
+│ stepfun/step-3.7-flash:… │ 1        │ 13.7K        │ 170           │ 1.7K       │ 13.9K        │ 0.1     │ 1         │ n/a               │
 └──────────────────────────┴──────────┴──────────────┴───────────────┴────────────┴──────────────┴─────────┴───────────┴─────────────────┘
 
 Token Usage — Per-Session Breakdown
@@ -138,13 +169,17 @@ Token Usage — Per-Session Breakdown
 ┌──────────────────────────┬──────────────────────────┬──────────────────┬──────────────────┬──────────────┬───────────────┬────────────┬───────────┬──────────────┬───────────┬─────────────────┐
 │ Session ID               │ Model                    │ Started At       │ Last Activity    │ Input Tokens │ Output Tokens │ Cache Read │ Reasoning │ Total Tokens │ API Calls │ Est. Cost (USD) │
 ├──────────────────────────┼──────────────────────────┼──────────────────┼──────────────────┼──────────────┼───────────────┼────────────┼───────────┼──────────────┼───────────┼─────────────────┤
-│ local-e0431b53af21ff312… │ nvidia/nemotron-3.5-sup… │ 2026-11-08 13:58 │ 2026-11-08 17:02 │ 6.2M         │ 682.0K        │ 253.7M     │ 205.6K    │ 6.9M         │ 922       │ USD 0.0000      │
-│ local-a12cc1362c85e6095… │ nvidia/nemotron-3.5-sup… │ 2026-11-19 12:17 │ 2026-11-19 12:45 │ 1.9M         │ 106.8K        │ 15.0M      │ 60.7K     │ 2.1M         │ 136       │ USD 0.0000      │
+│ local-e0431b53af21ff312… │ nvidia/nemotron-3.5-sup… │ 2026-11-08 13:58 │ 2026-11-08 17:02 │ 6.2M         │ 682.0K        │ 253.7M     │ 205.6K    │ 6.9M         │ 922       │ n/a             │
+│ local-a12cc1362c85e6095… │ nvidia/nemotron-3.5-sup… │ 2026-11-19 12:17 │ 2026-11-19 12:45 │ 1.9M         │ 106.8K        │ 15.0M      │ 60.7K     │ 2.1M         │ 136       │ n/a             │
 └──────────────────────────┴──────────────────────────┴──────────────────┴──────────────────┴──────────────┴───────────────┴────────────┴───────────┴──────────────┴───────────┴─────────────────┘
 ```
 
 The per-session table lists the top sessions by total token count, capped at
 `max_sessions` (default 50).
+
+The report also surfaces two ratio columns: **Cache Ratio** (cache reads ÷ real
+tokens, per totals/model/session) and **Share %** (a model's share of *that
+session's* tokens, not lifetime — so shares sum to ~100 within a session).
 
 ## Module layout
 
