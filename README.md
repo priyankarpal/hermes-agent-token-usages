@@ -25,6 +25,12 @@ Install:
 hermes plugins install priyankarpal/hermes-agent-token-usages --enable
 ```
 
+If you already had the plugin installed, reload it so Hermes picks up the new CLI arguments:
+
+```bash
+hermes plugins reload token-usage
+```
+
 Invoke:
 
 ```bash
