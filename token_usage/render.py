@@ -117,7 +117,7 @@ def _render_models(models: list[dict[str, Any]], grand_total: int,
     rows: list[list[str]] = []
     for m in models:
         rows.append([
-            truncate(m.get("model", "")),
+            m.get("model", ""),  # full model name, not truncated
             fmt_int(m.get("sessions", 0)),
             fmt_int(m.get("input_tokens", 0)),
             fmt_int(m.get("output_tokens", 0)),
@@ -141,11 +141,12 @@ def _render_sessions(sessions: list[dict[str, Any]], cfg: dict[str, Any],
     rows: list[list[str]] = []
     for s in sessions:
         sid = truncate(s.get("id", ""))
-        if s.get("id") == cur_id:
-            sid = sid + " *"
+        is_current = s.get("id") == cur_id
+        current_marker = "◄ current" if is_current else ""
         rows.append([
             sid,
-            truncate(s.get("model", "")),
+            s.get("model", ""),  # full model name, not truncated
+            current_marker,
             fmt_ts(s.get("started_at")),
             fmt_ts(s.get("last_activity_at")),
             fmt_int(s.get("input_tokens", 0)),
@@ -156,10 +157,11 @@ def _render_sessions(sessions: list[dict[str, Any]], cfg: dict[str, Any],
             fmt_int(s.get("api_call_count", 0)),
             fmt_cost(s.get("estimated_cost_usd", 0), currency),
         ])
-    headers = [L("hdr_session"), L("hdr_model"), L("hdr_started"),
-               L("hdr_last_activity"), L("hdr_input"), L("hdr_output"),
-               L("hdr_cache_read"), L("hdr_reasoning"), L("hdr_total"),
-               L("hdr_api_calls"), f"{L('hdr_est_cost')} ({currency})"]
+    headers = [L("hdr_session"), L("hdr_model"), L("hdr_current"),
+               L("hdr_started"), L("hdr_last_activity"), L("hdr_input"),
+               L("hdr_output"), L("hdr_cache_read"), L("hdr_reasoning"),
+               L("hdr_total"), L("hdr_api_calls"),
+               f"{L('hdr_est_cost')} ({currency})"]
     return box_table(L("session_title"), headers, rows)
 
 
@@ -170,7 +172,7 @@ def _render_session_models(session_models: list[dict[str, Any]],
     rows: list[list[str]] = []
     for sm in session_models:
         rows.append([
-            truncate(sm.get("model", "")),
+            sm.get("model", ""),  # full model name, not truncated
             sm.get("billing_provider", "") or L("meta_no_data"),
             truncate(sm.get("billing_base_url", "")),
             sm.get("billing_mode", "") or L("meta_no_data"),
