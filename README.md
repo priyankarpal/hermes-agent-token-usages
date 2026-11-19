@@ -1,15 +1,5 @@
 # Hermes Token Usage Plugin
 
-## Specification
-
-**Name:** token-usage
-**Version:** 0.1.0
-**Kind:** standalone plugin
-**Interface:** CLI command `hermes tokens` (no TUI, no slash command)
-**Database:** read-only access to `~/.hermes/state.db` (URI `mode=ro` + `PRAGMA query_only = ON`), so the running Hermes gateway is never locked or modified.
-**Network:** none required
-**Auth:** none required
-
 ## Purpose
 
 Surface token usage from the local Hermes database directly in the CLI.
