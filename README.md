@@ -43,34 +43,8 @@ All user-facing labels and column headers are also config-driven under
 
 ## Installation
 
-From the plugin folder:
-
 ```bash
-hermes plugins install ./path/to/token-usage --enable
-```
-
-Or copy into the plugins directory and enable in `config.yaml`:
-
-```bash
-cp -r token-usage ~/.hermes/plugins/token-usage
-```
-
-Then add to `~/.hermes/config.yaml`:
-
-```yaml
-token_plugin:
-  db_path: ~/.hermes/state.db
-  default_window: lifetime
-  include_archived: false
-  output_format: table
-  max_sessions: 50
-  profile: ""
-
-plugins:
-  enabled:
-    - agent-importers
-    - token-stats
-    - token-usage
+hermes plugins install priyankarpal/hermes-agent-token-usages --enable
 ```
 
 ## Database
