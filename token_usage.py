@@ -397,7 +397,7 @@ def _truncate(s: Any, width: int = 24) -> str:
 
 
 # ═════════════════════════════════════════════════════════════════════════
-# Table renderer (Unicode box-drawing, TUI-safe plain text)
+# Table renderer (Unicode box-drawing, plain text)
 # ═════════════════════════════════════════════════════════════════════════
 
 
@@ -809,8 +809,8 @@ def handle_cli(args: argparse.Namespace) -> int | None:
 def register(ctx: Any) -> None:
     """Plugin entry point — called by the Hermes plugin loader.
 
-    Registers only the CLI command (``hermes tokens``). TUI/slash-command
-    support was removed; this plugin is CLI-only.
+    Registers only the CLI command (``hermes tokens``). This plugin is
+    CLI-only.
     """
     ctx.register_cli_command(
         name="tokens",
