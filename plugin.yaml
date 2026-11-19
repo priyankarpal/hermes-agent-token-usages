@@ -1,0 +1,37 @@
+name: token-usage
+label: Token Usage
+kind: standalone
+version: 0.1.0
+author: Priyankar Pal
+homepage: https://github.com/priyankarpal/hermes-agent-token-usages
+requires_hermes: ">=0.23.0"
+description: >-
+  Token usage analytics from the local Hermes database (~/.hermes/state.db)
+  — lifetime totals, per-model breakdown, per-session details, cache/reasoning
+  tokens, API call counts and estimated cost. No network, no auth, no Hermes
+  Desktop required. Fully config-driven.
+tags: [cli, usage, tokens, analytics, cost]
+provides_tools: []
+provides_hooks: []
+config:
+  - key: token_plugin.db_path
+    default: ~/.hermes/state.db
+    description: "Path to the Hermes state SQLite database (read-only)."
+  - key: token_plugin.default_window
+    default: lifetime
+    description: "Default time window: lifetime, 7d, 30d, 90d."
+  - key: token_plugin.include_archived
+    default: false
+    description: "Include archived sessions in totals."
+  - key: token_plugin.output_format
+    default: table
+    description: "Output format: table, json."
+  - key: token_plugin.max_sessions
+    default: 50
+    description: "Max sessions to list in the per-session breakdown."
+  - key: token_plugin.profile
+    default: ""
+    description: "Optional profile_name filter applied to all queries."
+  - key: token_plugin.currency_label
+    default: USD
+    description: "Currency label for cost columns (USD only; no FX conversion, which would require network data)."
