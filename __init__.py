@@ -3,6 +3,6 @@
 Hermes imports ``hermes_plugins.token-usage`` and calls ``register(ctx)``.
 """
 
-from .token_usage import register
+from .plugin import register
 
 __all__ = ["register"]
