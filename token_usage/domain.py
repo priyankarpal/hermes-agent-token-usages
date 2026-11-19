@@ -243,6 +243,50 @@ class SessionModelUsageRow:
         }
 
 
+@dataclass(frozen=True)
+class TimelineBucket:
+    """Aggregated usage for a single time bucket (hour/day/month)."""
+
+    bucket: str
+    sessions: int
+    input_tokens: int
+    output_tokens: int
+    cache_read_tokens: int
+    cache_write_tokens: int
+    reasoning_tokens: int
+    total_tokens: int
+    api_calls: int
+    est_cost: float
+    actual_cost: float
+
+    @classmethod
+    def from_row(cls, row: dict[str, Any]) -> "TimelineBucket":
+        return cls(
+            bucket=str(row.get("bucket", "")),
+            sessions=int(row.get("sessions") or 0),
+            input_tokens=int(row.get("input_tokens") or 0),
+            output_tokens=int(row.get("output_tokens") or 0),
+            cache_read_tokens=int(row.get("cache_read_tokens") or 0),
+            cache_write_tokens=int(row.get("cache_write_tokens") or 0),
+            reasoning_tokens=int(row.get("reasoning_tokens") or 0),
+            total_tokens=int(row.get("total_tokens") or 0),
+            api_calls=int(row.get("api_calls") or 0),
+            est_cost=float(row.get("est_cost") or 0),
+            actual_cost=float(row.get("actual_cost") or 0),
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "bucket": self.bucket, "sessions": self.sessions,
+            "input_tokens": self.input_tokens, "output_tokens": self.output_tokens,
+            "cache_read_tokens": self.cache_read_tokens,
+            "cache_write_tokens": self.cache_write_tokens,
+            "reasoning_tokens": self.reasoning_tokens,
+            "total_tokens": self.total_tokens, "api_calls": self.api_calls,
+            "est_cost": self.est_cost, "actual_cost": self.actual_cost,
+        }
+
+
 @dataclass
 class UsageReport:
     """The full token-usage report aggregate."""
@@ -254,6 +298,10 @@ class UsageReport:
     session_mode: bool = False
     session_info: Optional[dict[str, Any]] = None
     session_models: list = field(default_factory=list)
+    current_session: Optional[dict[str, Any]] = None
+    timeline_mode: bool = False
+    timeline_granularity: str = "day"
+    timeline_buckets: list = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         out: dict[str, Any] = {
@@ -264,4 +312,12 @@ class UsageReport:
         if self.session_mode:
             out["session"] = self.session_info
             out["session_models"] = self.session_models
+        if self.current_session is not None:
+            out["current_session"] = self.current_session
+        if self.timeline_mode:
+            out["timeline_granularity"] = self.timeline_granularity
+            out["timeline_buckets"] = [
+                b.to_dict() if hasattr(b, "to_dict") else b
+                for b in self.timeline_buckets
+            ]
         return out

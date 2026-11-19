@@ -28,7 +28,7 @@ hermes plugins install priyankarpal/hermes-agent-token-usages --enable
 Invoke:
 
 ```bash
-hermes tokens [--window 7d|30d|90d|lifetime] [--model <model>] [--session <id>] [--format table|json] [--profile <profile>]
+hermes tokens [--window 7d|30d|90d|lifetime] [--model <model>] [--session <id>] [--format table|json] [--profile <profile>] [--timeline hour|day|month]
 ```
 
 | Argument | Values | Meaning |
@@ -38,6 +38,31 @@ hermes tokens [--window 7d|30d|90d|lifetime] [--model <model>] [--session <id>] 
 | `--session` | <session id> | Drill down into one session's model/billing rows |
 | `--profile` | <profile_name> | Filter to a specific profile |
 | `--format` | `table`, `json` | Output format |
+| `--timeline` | `hour`, `day`, `month` | Show usage timeline grouped by time bucket with a simple bar chart |
+
+## Feature 1: Current session
+
+Every normal report identifies the **current session** — the most recent
+active session by `last_activity_at`. It appears:
+
+* In the report header/meta section (`Current Session` row).
+* In the per-session table, marked with a trailing `*` next to the session id.
+* In JSON output under the `current_session` key.
+
+## Feature 2: Token Usage Timeline
+
+`--timeline hour|day|month` groups sessions into time buckets and renders a
+simple ASCII bar chart of total tokens per bucket, ordered chronologically.
+Use it to spot usage patterns over time:
+
+```bash
+hermes tokens --timeline day     # usage per day
+hermes tokens --timeline hour    # usage per hour
+hermes tokens --timeline month   # usage per month
+```
+
+In JSON output, the timeline appears under `timeline_granularity` and
+`timeline_buckets`.
 
 ## Configuration
 

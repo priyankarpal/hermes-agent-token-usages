@@ -134,12 +134,17 @@ def _render_models(models: list[dict[str, Any]], grand_total: int,
 
 
 def _render_sessions(sessions: list[dict[str, Any]], cfg: dict[str, Any],
-                     currency: str) -> str:
+                     currency: str,
+                     current_session: Optional[dict[str, Any]] = None) -> str:
     L = lambda k: label(cfg, k)
+    cur_id = current_session.get("id") if current_session else None
     rows: list[list[str]] = []
     for s in sessions:
+        sid = truncate(s.get("id", ""))
+        if s.get("id") == cur_id:
+            sid = sid + " *"
         rows.append([
-            truncate(s.get("id", "")),
+            sid,
             truncate(s.get("model", "")),
             fmt_ts(s.get("started_at")),
             fmt_ts(s.get("last_activity_at")),
@@ -193,7 +198,8 @@ def _render_session_models(session_models: list[dict[str, Any]],
 
 
 def _render_meta(cfg: dict[str, Any], db_path: str, window: str,
-                 profile: Optional[str], fmt: str) -> str:
+                 profile: Optional[str], fmt: str,
+                 current_session: Optional[dict[str, Any]] = None) -> str:
     L = lambda k: label(cfg, k)
     win_label = {
         "lifetime": L("meta_window_lifetime"),
@@ -207,8 +213,45 @@ def _render_meta(cfg: dict[str, Any], db_path: str, window: str,
         [L("hdr_profile"), profile or L("meta_no_data")],
         [L("hdr_format"), fmt],
     ]
+    if current_session is not None:
+        rows.append([
+            L("hdr_current_session"),
+            f"{truncate(current_session.get('id', ''))} "
+            f"({current_session.get('model', '') or L('meta_no_data')})",
+        ])
     return box_table(None, ["Key", "Value"], rows)
 
+
+def _render_timeline(buckets: list[dict[str, Any]], granularity: str,
+                     cfg: dict[str, Any], currency: str) -> str:
+    """Simple ASCII bar chart of token usage by time bucket."""
+    L = lambda k: label(cfg, k)
+    if not buckets:
+        return f"{L('timeline_title')}\n\n{L('meta_no_data')}"
+
+    max_total = max(int(b.get("total_tokens", 0)) for b in buckets) or 1
+    bar_width = 40
+
+    lines: list[str] = []
+    lines.append(L("timeline_title"))
+    lines.append(f"{L('meta_window')} ({granularity})")
+    lines.append("")
+
+    for b in buckets:
+        total = int(b.get("total_tokens", 0))
+        filled = int((total / max_total) * bar_width) if max_total else 0
+        bar = "█" * filled + "░" * (bar_width - filled)
+        lines.append(
+            f"{str(b.get('bucket', '')):16} │{bar}│ "
+            f"{fmt_int(total)} "
+            f"({int(b.get('sessions', 0))} {L('meta_sessions')}, "
+            f"{fmt_cost(b.get('est_cost', 0), currency)})"
+        )
+
+    return "\n".join(lines)
+
+
+# -- Top-level renderers ----------------------------------------------------
 
 def render_text(totals: dict[str, Any], models: list[dict[str, Any]],
                 sessions: list[dict[str, Any]], cfg: dict[str, Any],
@@ -216,12 +259,24 @@ def render_text(totals: dict[str, Any], models: list[dict[str, Any]],
                 fmt: str, currency: str,
                 session_mode: bool = False,
                 session_info: Optional[dict[str, Any]] = None,
-                session_models: Optional[list[dict[str, Any]]] = None) -> str:
+                session_models: Optional[list[dict[str, Any]]] = None,
+                current_session: Optional[dict[str, Any]] = None,
+                timeline_mode: bool = False,
+                timeline_granularity: str = "day",
+                timeline_buckets: Optional[list[dict[str, Any]]] = None
+                ) -> str:
     """Build the full plain-text report."""
     parts: list[str] = []
     grand_total = int(totals.get("total_tokens", 0))
-    parts.append(_render_meta(cfg, db_path, window, profile, fmt))
+    parts.append(_render_meta(cfg, db_path, window, profile, fmt,
+                              current_session=current_session))
     parts.append("")
+
+    if timeline_mode:
+        parts.append(_render_timeline(
+            timeline_buckets or [], timeline_granularity, cfg, currency))
+        return "\n".join(parts)
+
     if session_mode:
         if session_info is not None:
             L = lambda k: label(cfg, k)
@@ -255,7 +310,8 @@ def render_text(totals: dict[str, Any], models: list[dict[str, Any]],
         parts.append("")
         parts.append(_render_models(models, grand_total, cfg, currency))
         parts.append("")
-        parts.append(_render_sessions(sessions, cfg, currency))
+        parts.append(_render_sessions(sessions, cfg, currency,
+                                      current_session=current_session))
     return "\n".join(parts)
 
 
@@ -265,7 +321,12 @@ def render_json(totals: dict[str, Any], models: list[dict[str, Any]],
                 fmt: str, currency: str,
                 session_mode: bool = False,
                 session_info: Optional[dict[str, Any]] = None,
-                session_models: Optional[list[dict[str, Any]]] = None) -> str:
+                session_models: Optional[list[dict[str, Any]]] = None,
+                current_session: Optional[dict[str, Any]] = None,
+                timeline_mode: bool = False,
+                timeline_granularity: str = "day",
+                timeline_buckets: Optional[list[dict[str, Any]]] = None
+                ) -> str:
     out: dict[str, Any] = {
         "db_path": db_path,
         "window": window,
@@ -279,4 +340,9 @@ def render_json(totals: dict[str, Any], models: list[dict[str, Any]],
     if session_mode:
         out["session"] = session_info
         out["session_models"] = session_models or []
+    if current_session is not None:
+        out["current_session"] = current_session
+    if timeline_mode:
+        out["timeline_granularity"] = timeline_granularity
+        out["timeline_buckets"] = timeline_buckets or []
     return json.dumps(out, indent=2, default=str)

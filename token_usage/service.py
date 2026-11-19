@@ -13,7 +13,7 @@ from .config import WINDOWS, cfg_val
 from .db import open_db
 from .domain import (
     Currency, ModelUsage, OutputFormat, Session, SessionModelUsageRow,
-    UsageReport, Window,
+    TimelineBucket, UsageReport, Window,
 )
 
 
@@ -84,6 +84,9 @@ class TokenUsageService:
         max_sessions = int(cfg_val(cfg, "max_sessions", 50))
         profile = ns.profile or cfg_val(cfg, "profile", None) or None
         include_archived = bool(cfg_val(cfg, "include_archived", False))
+        granularity = str(getattr(ns, "timeline", None) or "day")
+        if granularity not in ("hour", "day", "month"):
+            granularity = "day"
 
         meta = {
             "db_path": db_path,
@@ -93,10 +96,25 @@ class TokenUsageService:
             "currency": currency,
         }
 
+        # -- timeline mode -------------------------------------------------
+        if getattr(ns, "timeline", None):
+            where, params = build_where(window, include_archived, profile)
+            buckets = self._build_timeline(granularity, where, params)
+            totals = self._aggregate_totals(where, params)
+            return UsageReport(
+                totals=totals, models=[], sessions=[], meta=meta,
+                session_mode=False, timeline_mode=True,
+                timeline_granularity=granularity,
+                timeline_buckets=buckets,
+            )
+
+        # -- current session (always included in normal reports) -----------
+        current_session = self._get_current_session(include_archived, profile)
+
         if ns.session:
             return self._build_session_report(
                 ns.session, window, include_archived, profile,
-                fmt, currency, meta,
+                fmt, currency, meta, current_session,
             )
 
         where, params = build_where(window, include_archived, profile, ns.model, None)
@@ -112,10 +130,78 @@ class TokenUsageService:
         models = self._list_models(models_where, models_params)
         sessions = self._list_sessions(where, params, max_sessions)
 
+        # mark the current session in the sessions list
+        cur_id = current_session.get("id") if current_session else None
+        for s in sessions:
+            s["is_current"] = (s.get("id") == cur_id)
+
         return UsageReport(
             totals=totals, models=models, sessions=sessions, meta=meta,
-            session_mode=False,
+            session_mode=False, current_session=current_session,
         )
+
+    # -- current session ----------------------------------------------------
+
+    def _get_current_session(
+        self, include_archived: bool, profile: Optional[str]
+    ) -> Optional[dict[str, Any]]:
+        """Most recent active session by last_activity_at."""
+        clauses: list[str] = []
+        params: list[Any] = []
+        if not include_archived:
+            clauses.append("archived = 0")
+        if profile is not None:
+            clauses.append("profile_name = ?")
+            params.append(profile)
+        where = " AND ".join(clauses) if clauses else "1=1"
+        sql = f"""
+        SELECT
+            id, model, started_at, last_activity_at,
+            input_tokens, output_tokens, cache_read_tokens, cache_write_tokens,
+            reasoning_tokens, api_call_count, estimated_cost_usd,
+            actual_cost_usd, (input_tokens + output_tokens) as total_tokens
+        FROM sessions
+        WHERE {where}
+        ORDER BY last_activity_at DESC
+        LIMIT 1
+        """
+        row = self._conn.execute(sql, params).fetchone()
+        return dict(row) if row else None
+
+    # -- timeline -----------------------------------------------------------
+
+    def _time_bucket_expr(self, granularity: str) -> str:
+        if granularity == "hour":
+            return "strftime('%Y-%m-%d %H', datetime(started_at, 'unixepoch'))"
+        if granularity == "month":
+            return "strftime('%Y-%m', datetime(started_at, 'unixepoch'))"
+        # day (default)
+        return "strftime('%Y-%m-%d', datetime(started_at, 'unixepoch'))"
+
+    def _build_timeline(
+        self, granularity: str, where: str, params: list[Any]
+    ) -> list[dict[str, Any]]:
+        bucket_expr = self._time_bucket_expr(granularity)
+        sql = f"""
+        SELECT
+            {bucket_expr} as bucket,
+            COUNT(*) as sessions,
+            COALESCE(SUM(input_tokens), 0) as input_tokens,
+            COALESCE(SUM(output_tokens), 0) as output_tokens,
+            COALESCE(SUM(cache_read_tokens), 0) as cache_read_tokens,
+            COALESCE(SUM(cache_write_tokens), 0) as cache_write_tokens,
+            COALESCE(SUM(reasoning_tokens), 0) as reasoning_tokens,
+            COALESCE(SUM(input_tokens + output_tokens), 0) as total_tokens,
+            COALESCE(SUM(api_call_count), 0) as api_calls,
+            COALESCE(SUM(estimated_cost_usd), 0) as est_cost,
+            COALESCE(SUM(actual_cost_usd), 0) as actual_cost
+        FROM sessions
+        WHERE {where}
+        GROUP BY bucket
+        ORDER BY bucket ASC
+        """
+        return [TimelineBucket.from_row(dict(r)).to_dict()
+                for r in self._conn.execute(sql, params).fetchall()]
 
     # -- internal query helpers -------------------------------------------
 
@@ -206,7 +292,9 @@ class TokenUsageService:
     def _build_session_report(self, session_id: str, window: str,
                               include_archived: bool, profile: Optional[str],
                               fmt: str, currency: str,
-                              meta: dict[str, Any]) -> UsageReport:
+                              meta: dict[str, Any],
+                              current_session: Optional[dict[str, Any]] = None
+                              ) -> UsageReport:
         session_info = self._get_session(session_id)
         session_models = self._list_session_models(session_id)
 
@@ -245,7 +333,7 @@ class TokenUsageService:
         return UsageReport(
             totals=totals, models=[], sessions=[], meta=meta,
             session_mode=True, session_info=session_info,
-            session_models=session_models,
+            session_models=session_models, current_session=current_session,
         )
 
 

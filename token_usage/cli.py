@@ -33,6 +33,10 @@ def build_arg_parser(prog: str = "hermes tokens") -> argparse.ArgumentParser:
                         help="Filter to a specific profile_name.")
     parser.add_argument("--format", choices=FORMATS, default=None,
                         help="Output format: table, json.")
+    parser.add_argument("--timeline", choices=("hour", "day", "month"),
+                        default=None,
+                        help="Show usage timeline grouped by hour/day/month "
+                             "with a simple bar chart.")
     return parser
 
 
@@ -59,6 +63,10 @@ def setup_cli(parser: argparse.ArgumentParser) -> None:
                         help="Filter to a specific profile_name.")
     parser.add_argument("--format", choices=("table", "json"), default=None,
                         help="Output format: table, json.")
+    parser.add_argument("--timeline", choices=("hour", "day", "month"),
+                        default=None,
+                        help="Show usage timeline grouped by hour/day/month "
+                             "with a simple bar chart.")
 
 
 def handle_cli(args: argparse.Namespace) -> int | None:
@@ -84,6 +92,10 @@ def handle_cli(args: argparse.Namespace) -> int | None:
                 session_mode=report.session_mode,
                 session_info=report.session_info,
                 session_models=report.session_models,
+                current_session=report.current_session,
+                timeline_mode=report.timeline_mode,
+                timeline_granularity=report.timeline_granularity,
+                timeline_buckets=report.timeline_buckets,
             )
             if fmt == "json"
             else render_text(
@@ -92,6 +104,10 @@ def handle_cli(args: argparse.Namespace) -> int | None:
                 session_mode=report.session_mode,
                 session_info=report.session_info,
                 session_models=report.session_models,
+                current_session=report.current_session,
+                timeline_mode=report.timeline_mode,
+                timeline_granularity=report.timeline_granularity,
+                timeline_buckets=report.timeline_buckets,
             )
         )
     finally:
@@ -118,20 +134,27 @@ def run(ns: argparse.Namespace, cfg: dict[str, Any]) -> str:
     except FileNotFoundError as exc:
         return label(cfg, "err_db_missing").format(db_path=db_path)
     currency = str(cfg_val(cfg, "currency_label", "USD"))
+    profile_val = ns.profile or cfg_val(cfg, "profile", None) or None
     if fmt == "json":
         return render_json(
             report.totals, report.models, report.sessions, cfg, db_path,
-            window, ns.profile or cfg_val(cfg, "profile", None) or None,
-            fmt, currency,
+            window, profile_val, fmt, currency,
             session_mode=report.session_mode,
             session_info=report.session_info,
             session_models=report.session_models,
+            current_session=report.current_session,
+            timeline_mode=report.timeline_mode,
+            timeline_granularity=report.timeline_granularity,
+            timeline_buckets=report.timeline_buckets,
         )
     return render_text(
         report.totals, report.models, report.sessions, cfg, db_path,
-        window, ns.profile or cfg_val(cfg, "profile", None) or None,
-        fmt, currency,
+        window, profile_val, fmt, currency,
         session_mode=report.session_mode,
         session_info=report.session_info,
         session_models=report.session_models,
+        current_session=report.current_session,
+        timeline_mode=report.timeline_mode,
+        timeline_granularity=report.timeline_granularity,
+        timeline_buckets=report.timeline_buckets,
     )
