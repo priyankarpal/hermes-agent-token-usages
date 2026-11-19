@@ -1,6 +1,6 @@
-"""token-usage plugin entry point.
+"""token-usage plugin package entry.
 
-Hermes imports ``hermes_plugins.token-usage`` and calls ``register(ctx)``.
+Hermes imports this package and calls ``register(ctx)``.
 """
 
 from .plugin import register

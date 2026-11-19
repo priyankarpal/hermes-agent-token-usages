@@ -1,8 +1,8 @@
-"""Config loading for the token-usage plugin.
+"""Config loading.
 
 All user-facing strings are config-driven
-(token_plugin.* in ~/.hermes/config.yaml, or TOKEN_PLUGIN_* environment
-variables); there are no hardcoded UI strings in this module.
+(``token_plugin.*`` in ``~/.hermes/config.yaml``, or ``TOKEN_PLUGIN_*``
+environment variables); there are no hardcoded UI strings.
 """
 
 from __future__ import annotations
@@ -16,7 +16,6 @@ try:
 except Exception:  # pragma: no cover - stdlib fallback only
     yaml = None
 
-# Config keys (the only hardcoded names; all UI text is config-driven)
 CONFIG_SECTION = "token_plugin"
 ENV_PREFIX = "TOKEN_PLUGIN_"
 WINDOWS = ("lifetime", "7d", "30d", "90d")
@@ -42,14 +41,9 @@ def _load_yaml_file(path: Path) -> dict[str, Any]:
 
 
 def _naive_yaml(text: str) -> dict[str, Any]:
-    """Tiny indentation-based YAML subset parser (2-3 levels).
-
-    Handles the flat/nested config we need (``token_plugin:`` → ``labels:`` →
-    ``hdr_db: ...``) without PyYAML.
-    """
+    """Tiny indentation-based YAML subset parser (2-3 levels)."""
     data: dict[str, Any] = {}
     stack: list[tuple[int, dict[str, Any]]] = [(-1, data)]
-
     for raw in text.splitlines():
         line = raw.split("#", 1)[0].rstrip()
         if not line.strip():
@@ -105,7 +99,7 @@ def _get_nested(data: Any, keys: list[str], default: Any = None) -> Any:
 
 
 def load_config() -> dict[str, Any]:
-    """token_plugin config: config.yaml values overlaid by TOKEN_PLUGIN_* env vars."""
+    """``token_plugin`` config: config.yaml values overlaid by ``TOKEN_PLUGIN_*`` env vars."""
     raw = _load_yaml_file(_config_file())
     tp = _get_nested(raw, [CONFIG_SECTION], {}) or {}
     if not isinstance(tp, dict):

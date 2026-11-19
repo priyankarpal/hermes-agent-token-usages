@@ -6,7 +6,7 @@
 **Version:** 0.1.0
 **Kind:** standalone plugin
 **Interface:** CLI command `hermes tokens` (no TUI, no slash command)
-**Database:** read-only access to `~/.hermes/state.db` (URI `mode=ro`)
+**Database:** read-only access to `~/.hermes/state.db` (URI `mode=ro` + `PRAGMA query_only = ON`), so the running Hermes gateway is never locked or modified.
 **Network:** none required
 **Auth:** none required
 
@@ -59,9 +59,16 @@ labels fall back to the key name itself.
 
 ## Database
 
-Reads only from `~/.hermes/state.db` via a read-only URI connection
-(`mode=ro`), so the running Hermes gateway is never locked. Tables used:
-`sessions` and `session_model_usage`. Never writes to the database.
+Reads only from `~/.hermes/state.db`. Two independent safety layers guarantee
+the Hermes state database is never written, locked, or modified:
+
+1. **URI `mode=ro`** — the database is opened with a read-only file descriptor,
+   so SQLite cannot write at the OS level.
+2. **`PRAGMA query_only = ON`** — SQLite rejects every INSERT/UPDATE/DELETE/
+   CREATE/DROP/ALTER statement at runtime.
+
+Only `SELECT` statements are executed. Tables used: `sessions` and
+`session_model_usage`. Never writes to the database.
 
 ## Example output
 
@@ -124,14 +131,12 @@ The per-session table lists the top sessions by total token count, capped at
 |--------|----------------|
 | `__init__.py` | Package entry; exports `register(ctx)` |
 | `plugin.py` | Hermes plugin registration (`register_cli_command`) |
-| `run.py` | Core query + report orchestration |
-| `cli.py` | Argument parsing (`--window`, `--model`, …) |
-| `commands.py` | CLI handler (`handle_cli`), config cache |
-| `config.py` | Config loading from `config.yaml` / `TOKEN_PLUGIN_*` env |
+| `config.py` | Config loading (`config.yaml` / `TOKEN_PLUGIN_*` env) |
 | `db.py` | Read-only SQLite connection (`mode=ro`) |
-| `queries.py` | SQL building and execution |
-| `format.py` | Number/timestamp/table formatting |
-| `render.py` | Plain-text tables and JSON rendering |
+| `domain.py` | Entities + value objects (Session, ModelUsage, Window, Currency, UsageReport) |
+| `service.py` | Report use case: DB queries + `TokenUsageService` |
+| `render.py` | Formatters + text/JSON rendering |
+| `cli.py` | Argparse + CLI handler + backward-compatible `run(ns, cfg)` |
 
 ## Requirements
 
