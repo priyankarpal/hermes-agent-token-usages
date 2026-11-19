@@ -39,6 +39,59 @@ Options:
 | `--profile` | Filter to a specific `profile_name` |
 | `--format` | Output format: `table` or `json` |
 
+## Example output
+
+Running `hermes tokens` (default `lifetime` window, `table` format):
+
+```text
+┌──────────┬───────────────────────────────┐
+│ Key      │ Value                         │
+├──────────┼───────────────────────────────┤
+│ Database │ /home/ubuntu/.hermes/state.db │
+│ Window   │ Lifetime                      │
+│ Profile  │ —                             │
+│ Format   │ table                         │
+└──────────┴───────────────────────────────┘
+
+Token Usage — Lifetime Totals
+
+┌───────────────────┬────────────┐
+│ Sessions          │ Value      │
+├───────────────────┼────────────┤
+│ Sessions          │ 34         │
+│ Input Tokens      │ 15.5M      │
+│ Output Tokens     │ 1.6M       │
+│ Cache Read        │ 429.4M     │
+│ Cache Write       │ 0          │
+│ Reasoning         │ 632.9K     │
+│ Total Tokens      │ 17.1M      │
+│ API Calls         │ 2.3K       │
+│ Est. Cost (USD)   │ USD 0.0000 │
+│ Actual Cost (USD) │ USD 0.0000 │
+└───────────────────┴────────────┘
+
+Token Usage — Per-Model Breakdown
+
+┌──────────────────────────┬──────────┬──────────────┬───────────────┬────────────┬──────────────┬─────────┬───────────┬─────────────────┐
+│ Model                    │ Sessions │ Input Tokens │ Output Tokens │ Cache Read │ Total Tokens │ Share % │ API Calls │ Est. Cost (USD) │
+├──────────────────────────┼──────────┼──────────────┼───────────────┼────────────┼──────────────┼─────────┼───────────┼─────────────────┤
+│ nvidia/nemotron-3.5-sup… │ 24       │ 15.2M        │ 1.6M          │ 418.1M     │ 16.9M        │ 98.4    │ 2.2K      │ USD 0.0000      │
+│ nvidia/nemotron-3-ultra… │ 7        │ 3.2M         │ 196.5K        │ 48.1M      │ 3.4M         │ 19.7    │ 420       │ USD 0.0000      │
+│ private/nvidia/nemotron… │ 24       │ 149.1K       │ 13.1K         │ 0          │ 162.2K       │ 0.9     │ 94        │ USD 0.0000      │
+│ stepfun/step-3.7-flash:… │ 1        │ 13.7K        │ 170           │ 1.7K       │ 13.9K        │ 0.1     │ 1         │ USD 0.0000      │
+└──────────────────────────┴──────────┴──────────────┴───────────────┴────────────┴──────────────┴─────────┴───────────┴─────────────────┘
+
+Token Usage — Per-Session Breakdown
+
+┌──────────────────────────┬──────────────────────────┬──────────────────┬──────────────────┬──────────────┬───────────────┬────────────┬───────────┬──────────────┬───────────┬─────────────────┐
+│ Session ID               │ Model                    │ Started At       │ Last Activity    │ Input Tokens │ Output Tokens │ Cache Read │ Reasoning │ Total Tokens │ API Calls │ Est. Cost (USD) │
+├──────────────────────────┼──────────────────────────┼──────────────────┼──────────────────┼──────────────┼───────────────┼────────────┼───────────┼──────────────┼───────────┼─────────────────┤
+│ local-e0431b53af21ff312… │ nvidia/nemotron-3.5-sup… │ 2026-11-08 13:58 │ 2026-11-08 17:02 │ 6.2M         │ 682.0K        │ 253.7M     │ 205.6K    │ 6.9M         │ 922       │ USD 0.0000      │
+│ local-a12cc1362c85e6095… │ nvidia/nemotron-3.5-sup… │ 2026-11-19 12:17 │ 2026-11-19 12:45 │ 1.9M         │ 106.8K        │ 15.0M      │ 60.7K     │ 2.1M         │ 136       │ USD 0.0000      │
+└──────────────────────────┴──────────────────────────┴──────────────────┴──────────────────┴──────────────┴───────────────┴────────────┴───────────┴──────────────┴───────────┴─────────────────┘
+```
+(Per-session table shows the top sessions by total token count, capped by `max_sessions`.)
+
 ## Configuration
 
 All configuration lives in `~/.hermes/config.yaml` under `token_plugin:`
