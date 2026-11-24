@@ -115,7 +115,7 @@ class TokenUsageService:
 
         # -- timeline mode -------------------------------------------------
         if getattr(ns, "timeline", None):
-            where, params = build_where(window, include_archived, profile)
+            where, params = build_models_where(window, include_archived, profile)
             buckets = self._build_timeline(granularity, where, params)
             totals = self._aggregate_totals(where, params)
             return UsageReport(
@@ -134,7 +134,13 @@ class TokenUsageService:
                 fmt, currency, meta, current_session,
             )
 
-        where, params = build_where(window, include_archived, profile, ns.model, None)
+        where, params = build_models_where(window, include_archived, profile)
+        if ns.model is not None:
+            if where == "1=1":
+                where = "smu.model = ?"
+            else:
+                where += " AND smu.model = ?"
+            params = params + [ns.model]
         totals = self._aggregate_totals(where, params)
 
         models_where, models_params = build_models_where(window, include_archived, profile)
@@ -209,20 +215,22 @@ class TokenUsageService:
         self, granularity: str, where: str, params: list[Any]
     ) -> list[dict[str, Any]]:
         bucket_expr = self._time_bucket_expr(granularity)
+        # Aggregate from session_model_usage joined with sessions for time bucketing
         sql = f"""
         SELECT
             {bucket_expr} as bucket,
-            COUNT(*) as sessions,
-            COALESCE(SUM(input_tokens), 0) as input_tokens,
-            COALESCE(SUM(output_tokens), 0) as output_tokens,
-            COALESCE(SUM(cache_read_tokens), 0) as cache_read_tokens,
-            COALESCE(SUM(cache_write_tokens), 0) as cache_write_tokens,
-            COALESCE(SUM(reasoning_tokens), 0) as reasoning_tokens,
-            COALESCE(SUM(input_tokens + output_tokens), 0) as total_tokens,
-            COALESCE(SUM(api_call_count), 0) as api_calls,
-            COALESCE(SUM(estimated_cost_usd), 0) as est_cost,
-            COALESCE(SUM(actual_cost_usd), 0) as actual_cost
-        FROM sessions
+            COUNT(DISTINCT smu.session_id) as sessions,
+            COALESCE(SUM(smu.input_tokens), 0) as input_tokens,
+            COALESCE(SUM(smu.output_tokens), 0) as output_tokens,
+            COALESCE(SUM(smu.cache_read_tokens), 0) as cache_read_tokens,
+            COALESCE(SUM(smu.cache_write_tokens), 0) as cache_write_tokens,
+            COALESCE(SUM(smu.reasoning_tokens), 0) as reasoning_tokens,
+            COALESCE(SUM(smu.input_tokens + smu.output_tokens), 0) as total_tokens,
+            COALESCE(SUM(smu.api_call_count), 0) as api_calls,
+            COALESCE(SUM(smu.estimated_cost_usd), 0) as est_cost,
+            COALESCE(SUM(smu.actual_cost_usd), 0) as actual_cost
+        FROM session_model_usage smu
+        JOIN sessions s ON s.id = smu.session_id
         WHERE {where}
         GROUP BY bucket
         ORDER BY bucket ASC
@@ -233,17 +241,20 @@ class TokenUsageService:
     # -- internal query helpers -------------------------------------------
 
     def _aggregate_totals(self, where: str, params: list[Any]) -> dict[str, Any]:
+        # Aggregate from session_model_usage joined with sessions for filtering
+        # The 'where' clause references sessions table columns (s.archived, s.started_at, etc.)
         sql = f"""
         SELECT
-            COUNT(*) as sessions,
-            COALESCE(SUM(input_tokens), 0) as input_tokens,
-            COALESCE(SUM(output_tokens), 0) as output_tokens,
-            COALESCE(SUM(cache_read_tokens), 0) as cache_read_tokens,
-            COALESCE(SUM(cache_write_tokens), 0) as cache_write_tokens,
-            COALESCE(SUM(reasoning_tokens), 0) as reasoning_tokens,
-            COALESCE(SUM(input_tokens + output_tokens), 0) as total_tokens,
-            COALESCE(SUM(api_call_count), 0) as api_calls
-        FROM sessions
+            COUNT(DISTINCT smu.session_id) as sessions,
+            COALESCE(SUM(smu.input_tokens), 0) as input_tokens,
+            COALESCE(SUM(smu.output_tokens), 0) as output_tokens,
+            COALESCE(SUM(smu.cache_read_tokens), 0) as cache_read_tokens,
+            COALESCE(SUM(smu.cache_write_tokens), 0) as cache_write_tokens,
+            COALESCE(SUM(smu.reasoning_tokens), 0) as reasoning_tokens,
+            COALESCE(SUM(smu.input_tokens + smu.output_tokens), 0) as total_tokens,
+            COALESCE(SUM(smu.api_call_count), 0) as api_calls
+        FROM session_model_usage smu
+        JOIN sessions s ON s.id = smu.session_id
         WHERE {where}
         """
         row = self._conn.execute(sql, params).fetchone()
@@ -274,19 +285,37 @@ class TokenUsageService:
             )
             # No trustworthy actual-cost source in the DB: do not fabricate 0.0000.
             row["actual_cost"] = None
+            # Add cache_hit_rate
+            cache_read = row.get("cache_read_tokens", 0)
+            input_tokens = row.get("input_tokens", 0)
+            if cache_read + input_tokens > 0:
+                row["cache_hit_rate"] = (cache_read / (cache_read + input_tokens)) * 100.0
+            else:
+                row["cache_hit_rate"] = None
             rows.append(row)
         return rows
 
     def _list_sessions(self, where: str, params: list[Any],
                        limit: int) -> list[dict[str, Any]]:
+        # Aggregate per-session from session_model_usage joined with sessions for metadata
         sql = f"""
         SELECT
-            id, model, started_at, last_activity_at,
-            input_tokens, output_tokens, cache_read_tokens, cache_write_tokens,
-            reasoning_tokens, api_call_count, estimated_cost_usd,
-            (input_tokens + output_tokens) as total_tokens
-        FROM sessions
+            s.id,
+            s.model,
+            s.started_at,
+            s.last_activity_at,
+            COALESCE(SUM(smu.input_tokens), 0) as input_tokens,
+            COALESCE(SUM(smu.output_tokens), 0) as output_tokens,
+            COALESCE(SUM(smu.cache_read_tokens), 0) as cache_read_tokens,
+            COALESCE(SUM(smu.cache_write_tokens), 0) as cache_write_tokens,
+            COALESCE(SUM(smu.reasoning_tokens), 0) as reasoning_tokens,
+            COALESCE(SUM(smu.api_call_count), 0) as api_call_count,
+            COALESCE(SUM(smu.estimated_cost_usd), 0) as estimated_cost_usd,
+            COALESCE(SUM(smu.input_tokens + smu.output_tokens), 0) as total_tokens
+        FROM sessions s
+        LEFT JOIN session_model_usage smu ON smu.session_id = s.id
         WHERE {where}
+        GROUP BY s.id, s.model, s.started_at, s.last_activity_at
         ORDER BY total_tokens DESC
         LIMIT ?
         """
@@ -297,6 +326,13 @@ class TokenUsageService:
                 row.get("model", ""), row.get("input_tokens", 0), row.get("output_tokens", 0)
             )
             row["actual_cost"] = None
+            # Add cache_hit_rate
+            cache_read = row.get("cache_read_tokens", 0)
+            input_tokens = row.get("input_tokens", 0)
+            if cache_read + input_tokens > 0:
+                row["cache_hit_rate"] = (cache_read / (cache_read + input_tokens)) * 100.0
+            else:
+                row["cache_hit_rate"] = None
             rows.append(row)
         return rows
 
@@ -319,6 +355,13 @@ class TokenUsageService:
             row.get("model", ""), row.get("input_tokens", 0), row.get("output_tokens", 0)
         )
         row["actual_cost"] = None
+        # Add cache_hit_rate
+        cache_read = row.get("cache_read_tokens", 0)
+        input_tokens = row.get("input_tokens", 0)
+        if cache_read + input_tokens > 0:
+            row["cache_hit_rate"] = (cache_read / (cache_read + input_tokens)) * 100.0
+        else:
+            row["cache_hit_rate"] = None
         return row
 
     def _list_session_models(self, session_id: str) -> list[dict[str, Any]]:
@@ -339,6 +382,13 @@ class TokenUsageService:
                 row.get("model", ""), row.get("input_tokens", 0), row.get("output_tokens", 0)
             )
             row["actual_cost"] = None
+            # Add cache_hit_rate
+            cache_read = row.get("cache_read_tokens", 0)
+            input_tokens = row.get("input_tokens", 0)
+            if cache_read + input_tokens > 0:
+                row["cache_hit_rate"] = (cache_read / (cache_read + input_tokens)) * 100.0
+            else:
+                row["cache_hit_rate"] = None
             rows.append(row)
         return rows
 

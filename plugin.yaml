@@ -1,7 +1,7 @@
 name: token-usage
 label: Token Usage
 kind: standalone
-version: 0.1.0
+version: 0.2.0
 author: Priyankar Pal
 homepage: https://github.com/priyankarpal/hermes-agent-token-usages
 requires_hermes: ">=0.23.0"

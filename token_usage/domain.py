@@ -108,6 +108,19 @@ class Session:
     archived: int
     profile_name: Optional[str]
 
+    @property
+    def cache_hit_rate(self) -> Optional[float]:
+        """Cache hit rate as percentage: cache_read / (cache_read + input) * 100.
+        
+        Returns None when denominator is 0 (no tokens at all).
+        Returns 0.0 when cache_read is 0 but input > 0.
+        Returns 100.0 when input is 0 but cache_read > 0.
+        """
+        denominator = self.cache_read_tokens + self.input_tokens
+        if denominator == 0:
+            return None
+        return (self.cache_read_tokens / denominator) * 100.0
+
     @classmethod
     def from_row(cls, row: dict[str, Any]) -> "Session":
         return cls(
@@ -141,6 +154,7 @@ class Session:
             "actual_cost_usd": self.actual_cost_usd,
             "total_tokens": self.total_tokens, "archived": self.archived,
             "profile_name": self.profile_name,
+            "cache_hit_rate": self.cache_hit_rate,
         }
 
 
@@ -159,6 +173,19 @@ class ModelUsage:
     api_calls: int
     est_cost: float
     actual_cost: float
+
+    @property
+    def cache_hit_rate(self) -> Optional[float]:
+        """Cache hit rate as percentage: cache_read / (cache_read + input) * 100.
+        
+        Returns None when denominator is 0 (no tokens at all).
+        Returns 0.0 when cache_read is 0 but input > 0.
+        Returns 100.0 when input is 0 but cache_read > 0.
+        """
+        denominator = self.cache_read_tokens + self.input_tokens
+        if denominator == 0:
+            return None
+        return (self.cache_read_tokens / denominator) * 100.0
 
     @classmethod
     def from_row(cls, row: dict[str, Any]) -> "ModelUsage":
@@ -185,6 +212,7 @@ class ModelUsage:
             "reasoning_tokens": self.reasoning_tokens,
             "total_tokens": self.total_tokens, "api_calls": self.api_calls,
             "est_cost": self.est_cost, "actual_cost": self.actual_cost,
+            "cache_hit_rate": self.cache_hit_rate,
         }
 
 
@@ -259,6 +287,19 @@ class TimelineBucket:
     est_cost: float
     actual_cost: float
 
+    @property
+    def cache_hit_rate(self) -> Optional[float]:
+        """Cache hit rate as percentage: cache_read / (cache_read + input) * 100.
+        
+        Returns None when denominator is 0 (no tokens at all).
+        Returns 0.0 when cache_read is 0 but input > 0.
+        Returns 100.0 when input is 0 but cache_read > 0.
+        """
+        denominator = self.cache_read_tokens + self.input_tokens
+        if denominator == 0:
+            return None
+        return (self.cache_read_tokens / denominator) * 100.0
+
     @classmethod
     def from_row(cls, row: dict[str, Any]) -> "TimelineBucket":
         return cls(
@@ -284,6 +325,7 @@ class TimelineBucket:
             "reasoning_tokens": self.reasoning_tokens,
             "total_tokens": self.total_tokens, "api_calls": self.api_calls,
             "est_cost": self.est_cost, "actual_cost": self.actual_cost,
+            "cache_hit_rate": self.cache_hit_rate,
         }
 
 

@@ -36,8 +36,8 @@ def _load_yaml_file(path: Path) -> dict[str, Any]:
     text = path.read_text(encoding="utf-8")
     if yaml is not None:
         data = yaml.safe_load(text)
-        return data if isinstance(data, dict) else {}
-    return _naive_yaml(text)
+        return _coerce_config_values(data) if isinstance(data, dict) else {}
+    return _coerce_config_values(_naive_yaml(text))
 
 
 def _naive_yaml(text: str) -> dict[str, Any]:
@@ -83,6 +83,17 @@ def _coerce_env(value: str) -> Any:
         return value
 
 
+def _coerce_config_values(data: Any) -> Any:
+    """Recursively coerce string config values to proper types."""
+    if isinstance(data, dict):
+        return {k: _coerce_config_values(v) for k, v in data.items()}
+    if isinstance(data, list):
+        return [_coerce_config_values(v) for v in data]
+    if isinstance(data, str):
+        return _coerce_env(data)
+    return data
+
+
 def _set_nested(data: dict[str, Any], keys: list[str], value: Any) -> None:
     for k in keys[:-1]:
         data = data.setdefault(k, {})
@@ -104,6 +115,17 @@ def load_config() -> dict[str, Any]:
     tp = _get_nested(raw, [CONFIG_SECTION], {}) or {}
     if not isinstance(tp, dict):
         tp = {}
+    # Default labels for new cache metrics
+    default_labels = {
+        "hdr_cache_multiplier": "Cache Multiplier",
+        "hdr_cache_hit_rate": "Cache Hit Rate",
+    }
+    # Merge user labels with defaults (user labels take precedence)
+    user_labels = tp.get("labels", {})
+    if not isinstance(user_labels, dict):
+        user_labels = {}
+    tp["labels"] = {**default_labels, **user_labels}
+    
     cfg: dict[str, Any] = {CONFIG_SECTION: dict(tp)}
     for env_key, value in os.environ.items():
         if not env_key.startswith(ENV_PREFIX):
