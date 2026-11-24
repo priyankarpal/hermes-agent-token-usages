@@ -224,3 +224,11 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Local agent skills and issue tracker (never commit)
+.agents/skills/
+.scratch/
+
+# Generated files
+spec-review-findings.json
+skills-lock.json
