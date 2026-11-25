@@ -101,9 +101,12 @@ class TokenUsageService:
         max_sessions = int(cfg_val(cfg, "max_sessions", 50))
         profile = ns.profile or cfg_val(cfg, "profile", None) or None
         include_archived = bool(cfg_val(cfg, "include_archived", False))
-        granularity = str(getattr(ns, "timeline", None) or "day")
-        if granularity not in ("hour", "day", "month"):
-            granularity = "day"
+        
+        # Handle new --by flag (timeline_mode + timeline_granularity)
+        timeline_mode = getattr(ns, "timeline", False)
+        timeline_granularity = getattr(ns, "timeline_granularity", "day")
+        if timeline_granularity not in ("day", "month", "year"):
+            timeline_granularity = "day"
 
         meta = {
             "db_path": db_path,
@@ -114,14 +117,14 @@ class TokenUsageService:
         }
 
         # -- timeline mode -------------------------------------------------
-        if getattr(ns, "timeline", None):
+        if timeline_mode:
             where, params = build_models_where(window, include_archived, profile)
-            buckets = self._build_timeline(granularity, where, params)
+            buckets = self._build_timeline(timeline_granularity, where, params)
             totals = self._aggregate_totals(where, params)
             return UsageReport(
                 totals=totals, models=[], sessions=[], meta=meta,
                 session_mode=False, timeline_mode=True,
-                timeline_granularity=granularity,
+                timeline_granularity=timeline_granularity,
                 timeline_buckets=buckets,
             )
 
@@ -204,10 +207,10 @@ class TokenUsageService:
     # -- timeline -----------------------------------------------------------
 
     def _time_bucket_expr(self, granularity: str) -> str:
-        if granularity == "hour":
-            return "strftime('%Y-%m-%d %H', datetime(started_at, 'unixepoch'))"
         if granularity == "month":
             return "strftime('%Y-%m', datetime(started_at, 'unixepoch'))"
+        if granularity == "year":
+            return "strftime('%Y', datetime(started_at, 'unixepoch'))"
         # day (default)
         return "strftime('%Y-%m-%d', datetime(started_at, 'unixepoch'))"
 
