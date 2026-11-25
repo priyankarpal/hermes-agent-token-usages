@@ -11,3 +11,9 @@ dependencies = []
 
 [tool.setuptools.packages.find]
 include = ["token_usage*"]
+
+[tool.pytest.ini_options]
+testpaths = ["token_usage/tests"]
+pythonpath = ["."]
+norecursedirs = [".git", "__pycache__", ".pytest_cache", "token_usage.egg-info"]
+collect_ignore = ["__init__.py"]
